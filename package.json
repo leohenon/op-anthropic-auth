@@ -1,0 +1,11 @@
+{
+  "name": "op-anthropic-auth",
+  "version": "0.0.2",
+  "main": "./index.mjs",
+  "dependencies": {
+    "@openauthjs/openauth": "^0.4.3"
+  },
+  "devDependencies": {
+    "@opencode-ai/plugin": "^0.4.45"
+  }
+}
