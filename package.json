@@ -2,8 +2,17 @@
   "name": "op-anthropic-auth",
   "version": "0.0.2",
   "main": "./index.mjs",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/leohenon/op-anthropic-auth"
+  },
+  "homepage": "https://github.com/leohenon/op-anthropic-auth#readme",
+  "bugs": {
+    "url": "https://github.com/leohenon/op-anthropic-auth/issues"
+  },
   "scripts": {
     "smoke": "node ./smoke.mjs",
+    "smoke:refresh": "ANTHROPIC_SMOKE_REFRESH=1 node ./smoke.mjs",
     "prepublishOnly": "npm run smoke"
   },
   "dependencies": {

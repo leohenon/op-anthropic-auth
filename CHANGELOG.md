@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.0.3
+
+- Made `npm run smoke` non-destructive by default
+- Added explicit `smoke:refresh` mode for refresh-token validation
+- Switched smoke default model to `claude-3-haiku-20240307`
+- Added npm metadata links
+
 ## 0.0.2
 
 - Switched OAuth token endpoints to `platform.claude.com`

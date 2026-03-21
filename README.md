@@ -2,7 +2,9 @@
 
 Anthropic OAuth plugin for OpenCode-compatible clients.
 
-Current npm version: `0.0.2`
+Current npm version: `0.0.3`
+
+npm package: https://www.npmjs.com/package/op-anthropic-auth
 
 Tested with `opencode@1.2.27` and `ocv@1.2.27-vim.2.4`.
 
@@ -23,3 +25,9 @@ npm i -g op-anthropic-auth@latest
 ```
 
 Restart your client, run `/connect`, then choose `Anthropic API Key` -> `Claude Pro/Max`.
+
+## Verify
+
+```bash
+npm run smoke
+```
