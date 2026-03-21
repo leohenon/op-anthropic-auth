@@ -29,3 +29,7 @@ Restart your client, run `/connect`, then choose `Anthropic API Key` -> `Claude 
 ```bash
 npm run smoke
 ```
+
+## License
+
+MIT
