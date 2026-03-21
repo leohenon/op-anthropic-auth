@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.0.4
+
+- Added localhost OAuth callback flow (`method: "auto"`) with fallback to manual code entry
+- Kept token exchange compatible with callback URL, code/state, and PKCE validation
+
 ## 0.0.3
 
 - Made `npm run smoke` non-destructive by default
