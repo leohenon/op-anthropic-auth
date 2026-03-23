@@ -1,10 +1,10 @@
 # Opencode Anthropic Oauth
 
+[![npm](https://img.shields.io/npm/v/op-anthropic-auth?style=flat-square&logo=npm&logoColor=white&label=npm&color=teal)](https://www.npmjs.com/package/op-anthropic-auth) [![downloads](https://img.shields.io/npm/dm/op-anthropic-auth?style=flat-square&logo=npm&logoColor=white&label=downloads&color=teal)](https://www.npmjs.com/package/op-anthropic-auth) [![node](https://img.shields.io/badge/node-%3E%3D18-teal?style=flat-square&logo=nodedotjs&logoColor=white)](https://nodejs.org)
+
 Anthropic OAuth plugin for OpenCode-compatible clients.
 
-Current npm version: `0.0.4`
-
-Tested with `opencode@1.2.27` and `ocv@1.2.27-vim.2.4`.
+Tested with `opencode@1.3.0` and `ocv@1.3.0-ocv.2.7`.
 
 ## Install
 
