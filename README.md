@@ -5,7 +5,7 @@
 Anthropic OAuth plugin for OpenCode-compatible clients.
 
 > [!WARNING]
-> Use this at your own risk. There have been public reports of users getting banned after using Claude OAuth with OpenCode or similar third-party tools.
+> Use at your own risk. This may violate Anthropic's Terms of Service.
 
 ## Install
 
