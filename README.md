@@ -4,8 +4,6 @@
 
 Anthropic OAuth plugin for OpenCode-compatible clients.
 
-Tested with `opencode@1.3.0` and `ocv@1.3.0-ocv.2.7`.
-
 > [!WARNING]
 > Use this at your own risk. There have been public reports of users getting banned after using Claude OAuth with OpenCode or similar third-party tools.
 
