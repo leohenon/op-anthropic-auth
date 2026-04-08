@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.0.8
+
+- Clarify in the README that Claude account OAuth in third-party tools require Anthropic extra usage instead of Claude Pro/Max plan limits
+
 ## 0.0.7
 
 - Align OAuth message request headers with current Claude Code behavior
