@@ -1,7 +1,12 @@
 {
   "name": "op-anthropic-auth",
-  "version": "0.0.6",
-  "main": "./index.mjs",
+  "version": "0.0.7",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
   "license": "MIT",
   "engines": {
     "node": ">=18"
@@ -14,14 +19,17 @@
     "url": "https://github.com/leohenon/op-anthropic-auth/issues"
   },
   "scripts": {
-    "smoke": "node ./smoke.mjs",
-    "smoke:refresh": "ANTHROPIC_SMOKE_REFRESH=1 node ./smoke.mjs",
-    "prepublishOnly": "npm run smoke"
+    "build": "tsc -p tsconfig.json",
+    "smoke": "npm run build && node ./dist/smoke.js",
+    "smoke:refresh": "npm run build && ANTHROPIC_SMOKE_REFRESH=1 node ./dist/smoke.js",
+    "prepublishOnly": "npm run build && npm run smoke"
   },
   "dependencies": {
     "@openauthjs/openauth": "^0.4.3"
   },
   "devDependencies": {
-    "@opencode-ai/plugin": "^0.4.45"
+    "@opencode-ai/plugin": "^0.4.45",
+    "@types/node": "^24.6.1",
+    "typescript": "^5.9.3"
   }
 }

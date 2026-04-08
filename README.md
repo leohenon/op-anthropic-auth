@@ -25,6 +25,21 @@ npm i -g op-anthropic-auth@latest
 
 Restart your client, run `/connect`, then choose `Anthropic API Key` -> `Claude Pro/Max`.
 
+## Request headers
+
+OAuth requests now send the Claude Code-style headers required by the current API:
+
+- `anthropic-version: 2023-06-01`
+- `x-app: cli`
+- `anthropic-beta: oauth-2025-04-20,interleaved-thinking-2025-05-14`
+- `user-agent: claude-code/<version>`
+
+You can override the resolved version or full `User-Agent` with:
+
+- `OP_ANTHROPIC_AUTH_CLAUDE_CODE_CHANNEL`
+- `OP_ANTHROPIC_AUTH_CLAUDE_CODE_VERSION`
+- `OP_ANTHROPIC_AUTH_USER_AGENT`
+
 ## Verify
 
 ```bash

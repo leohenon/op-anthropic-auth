@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.0.7
+
+- Align OAuth message request headers with current Claude Code behavior
+- Add `anthropic-version: 2023-06-01` and `x-app: cli` for OAuth message calls
+- Resolve Claude Code `User-Agent` from npm with env overrides and fallback
+- Update smoke test to match current OAuth request headers
+
 ## 0.0.4
 
 - Added localhost OAuth callback flow (`method: "auto"`) with fallback to manual code entry
