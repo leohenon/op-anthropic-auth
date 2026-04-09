@@ -8,6 +8,7 @@ const CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
 const ANTHROPIC_VERSION = "2023-06-01";
 const APP_ID = "cli";
 const CLAUDE_CODE_FALLBACK = "2.1.96";
+const DEVICE_ID = crypto.randomUUID();
 
 type StoredAuthFile = {
   anthropic?: {
@@ -98,6 +99,13 @@ const message = await fetch(MESSAGE_URL, {
     model,
     max_tokens: 16,
     messages: [{ role: "user", content: "ping" }],
+    metadata: {
+      user_id: JSON.stringify({
+        device_id: DEVICE_ID,
+        account_uuid: "",
+        session_id: crypto.randomUUID(),
+      }),
+    },
   }),
 });
 

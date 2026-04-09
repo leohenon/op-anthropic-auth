@@ -1,4 +1,7 @@
 import { createServer } from "node:http";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { generatePKCE } from "@openauthjs/openauth/pkce";
 import type { Plugin, PluginInput } from "@opencode-ai/plugin";
 
@@ -15,6 +18,27 @@ const REQUIRED_BETAS = [
   "interleaved-thinking-2025-05-14",
 ] as const;
 const TOOL_PREFIX = "mcp_";
+const SESSION_ID = crypto.randomUUID();
+
+const DEVICE_ID_PATH = join(homedir(), ".local", "share", "opencode", ".anthropic_device_id");
+const DEVICE_ID = (() => {
+  try {
+    if (existsSync(DEVICE_ID_PATH)) {
+      const existing = readFileSync(DEVICE_ID_PATH, "utf8").trim();
+      if (/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(existing)) {
+        return existing;
+      }
+    }
+  } catch {}
+
+  const id = crypto.randomUUID();
+  try {
+    mkdirSync(join(DEVICE_ID_PATH, ".."), { recursive: true });
+    writeFileSync(DEVICE_ID_PATH, id, "utf8");
+  } catch {}
+  return id;
+})();
+
 const OPENCODE_IDENTITY = "You are OpenCode, the best coding agent on the planet.";
 const CLAUDE_CODE_IDENTITY = "You are a Claude agent, built on Anthropic's Claude Agent SDK.";
 const PARAGRAPH_REMOVAL_ANCHORS = [
@@ -463,7 +487,17 @@ function rewriteRequestBody(body: BodyInit | null | undefined): BodyInit | null 
         role?: string;
         content?: string | Array<{ type?: string; name?: string; text?: string } & Record<string, unknown>>;
       }>;
+      metadata?: { user_id?: string };
     };
+
+    if (!parsed.metadata) parsed.metadata = {};
+    if (!parsed.metadata.user_id) {
+      parsed.metadata.user_id = JSON.stringify({
+        device_id: DEVICE_ID,
+        account_uuid: "",
+        session_id: SESSION_ID,
+      });
+    }
 
     parsed.system = prependClaudeCodeIdentity(parsed.system);
 
@@ -567,6 +601,7 @@ function setOAuthHeaders(headers: Headers, auth: OAuthAuth, userAgent: string): 
   headers.set("anthropic-version", ANTHROPIC_VERSION);
   headers.set("anthropic-beta", [...new Set([...REQUIRED_BETAS, ...betas])].join(","));
   headers.set("x-app", APP_ID);
+  headers.set("x-request-id", crypto.randomUUID());
   headers.set("user-agent", userAgent);
   headers.delete("x-api-key");
 
