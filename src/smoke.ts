@@ -54,14 +54,15 @@ if (refreshMode) {
   const token = await fetch(TOKEN_URL, {
     method: "POST",
     headers: {
-      "Content-Type": "application/json",
-      "User-Agent": "axios/1.13.6",
+      Accept: "application/json, text/plain, */*",
+      "Content-Type": "application/x-www-form-urlencoded",
+      "User-Agent": userAgent,
     },
-    body: JSON.stringify({
+    body: new URLSearchParams({
       grant_type: "refresh_token",
       refresh_token: refresh,
       client_id: CLIENT_ID,
-    }),
+    }).toString(),
   });
 
   if (!token.ok) {

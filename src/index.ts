@@ -15,6 +15,15 @@ const REQUIRED_BETAS = [
   "interleaved-thinking-2025-05-14",
 ] as const;
 const TOOL_PREFIX = "mcp_";
+const OPENCODE_IDENTITY = "You are OpenCode, the best coding agent on the planet.";
+const CLAUDE_CODE_IDENTITY = "You are a Claude agent, built on Anthropic's Claude Agent SDK.";
+const PARAGRAPH_REMOVAL_ANCHORS = [
+  "github.com/anomalyco/opencode",
+  "opencode.ai/docs",
+] as const;
+const TEXT_REPLACEMENTS: Array<{ match: string; replacement: string }> = [
+  { match: "if OpenCode honestly", replacement: "if the assistant honestly" },
+];
 
 let cachedUserAgent: string | undefined;
 let pendingUserAgent: Promise<string> | undefined;
@@ -305,6 +314,22 @@ async function authorize(mode: Mode) {
   };
 }
 
+function makeTokenHeaders(userAgent: string): HeadersInit {
+  return {
+    Accept: "application/json, text/plain, */*",
+    "Content-Type": "application/x-www-form-urlencoded",
+    "User-Agent": userAgent,
+  };
+}
+
+function makeTokenBody(params: Record<string, string>): string {
+  const body = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) {
+    body.set(key, value);
+  }
+  return body.toString();
+}
+
 async function exchange(
   input: string,
   verifier: string,
@@ -315,13 +340,11 @@ async function exchange(
   if (!parsed) return { type: "failed" };
   if (parsed.state !== expected) return { type: "failed" };
 
+  const userAgent = await resolveUserAgent();
   const result = await fetch(TOKEN_URL, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "User-Agent": "axios/1.13.6",
-    },
-    body: JSON.stringify({
+    headers: makeTokenHeaders(userAgent),
+    body: makeTokenBody({
       code: parsed.code,
       state: parsed.state,
       grant_type: "authorization_code",
@@ -347,30 +370,126 @@ async function exchange(
   };
 }
 
+function sanitizeSystemText(text: string): string {
+  if (!text.includes(OPENCODE_IDENTITY)) return text;
+
+  const paragraphs = text.split(/\n\n+/);
+  const filtered = paragraphs.filter((paragraph) => {
+    if (paragraph.includes(OPENCODE_IDENTITY) && paragraph.trim() === OPENCODE_IDENTITY) {
+      return false;
+    }
+
+    for (const anchor of PARAGRAPH_REMOVAL_ANCHORS) {
+      if (paragraph.includes(anchor)) return false;
+    }
+
+    return true;
+  });
+
+  let result = filtered.join("\n\n");
+  result = result.replace(OPENCODE_IDENTITY, "").replace(/\n{3,}/g, "\n\n");
+
+  for (const rule of TEXT_REPLACEMENTS) {
+    result = result.replace(rule.match, rule.replacement);
+  }
+
+  result = result
+    .replace(/\bOpenCode\b/g, "Claude Code")
+    .replace(/\bopencode\b/gi, "Claude");
+
+  return result.trim();
+}
+
+function prependClaudeCodeIdentity(system: unknown): Array<{ type: string; text: string } & Record<string, unknown>> {
+  const identityBlock = {
+    type: "text",
+    text: CLAUDE_CODE_IDENTITY,
+  };
+
+  if (system == null) return [identityBlock];
+
+  if (typeof system === "string") {
+    const sanitized = sanitizeSystemText(system);
+    if (sanitized === CLAUDE_CODE_IDENTITY) return [identityBlock];
+    return [identityBlock, { type: "text", text: sanitized }];
+  }
+
+  if (!Array.isArray(system) && typeof system === "object") {
+    const record = system as Record<string, unknown>;
+    return [
+      identityBlock,
+      {
+        ...record,
+        type: typeof record.type === "string" ? record.type : "text",
+        text: sanitizeSystemText(typeof record.text === "string" ? record.text : ""),
+      },
+    ];
+  }
+
+  if (!Array.isArray(system)) return [identityBlock];
+
+  const sanitized = system.map((item) => {
+    if (typeof item === "string") {
+      return { type: "text", text: sanitizeSystemText(item) };
+    }
+
+    if (item && typeof item === "object") {
+      const record = item as Record<string, unknown>;
+      return {
+        ...record,
+        type: record.type === "text" ? "text" : typeof record.type === "string" ? record.type : "text",
+        text: sanitizeSystemText(typeof record.text === "string" ? record.text : ""),
+      };
+    }
+
+    return { type: "text", text: String(item) };
+  });
+
+  if (sanitized[0]?.text === CLAUDE_CODE_IDENTITY) {
+    return sanitized;
+  }
+
+  return [identityBlock, ...sanitized];
+}
+
 function rewriteRequestBody(body: BodyInit | null | undefined): BodyInit | null | undefined {
   if (!body || typeof body !== "string") return body;
 
   try {
     const parsed = JSON.parse(body) as {
-      system?: Array<{ type?: string; text?: string }>;
+      system?: unknown;
       tools?: Array<{ name?: string } & Record<string, unknown>>;
       messages?: Array<{
-        content?: Array<{ type?: string; name?: string } & Record<string, unknown>>;
+        role?: string;
+        content?: string | Array<{ type?: string; name?: string; text?: string } & Record<string, unknown>>;
       }>;
     };
 
-    if (Array.isArray(parsed.system)) {
-      parsed.system = parsed.system.map((item) => {
-        if (item.type === "text" && item.text) {
-          return {
-            ...item,
-            text: item.text
-              .replace(/OpenCode/g, "Claude Code")
-              .replace(/opencode/gi, "Claude"),
-          };
+    parsed.system = prependClaudeCodeIdentity(parsed.system);
+
+    if (Array.isArray(parsed.system) && parsed.system.length > 1) {
+      const kept = [parsed.system[0]];
+      const movedTexts: string[] = [];
+
+      for (let i = 1; i < parsed.system.length; i++) {
+        const entry = parsed.system[i] as { text?: string } | string;
+        const text = typeof entry === "string" ? entry : trim(entry?.text);
+        if (text) movedTexts.push(text);
+      }
+
+      if (movedTexts.length > 0 && Array.isArray(parsed.messages)) {
+        const firstUser = parsed.messages.find((message) => message.role === "user");
+        if (firstUser) {
+          parsed.system = kept;
+          const prefix = movedTexts.join("\n\n");
+
+          if (typeof firstUser.content === "string") {
+            firstUser.content = `${prefix}\n\n${firstUser.content}`;
+          } else if (Array.isArray(firstUser.content)) {
+            firstUser.content.unshift({ type: "text", text: prefix });
+          }
         }
-        return item;
-      });
+      }
     }
 
     if (Array.isArray(parsed.tools)) {
@@ -406,11 +525,7 @@ function rewriteRequestBody(body: BodyInit | null | undefined): BodyInit | null 
   }
 }
 
-function mergeHeaders(
-  input: RequestInfo | URL,
-  init: RequestInit,
-  auth: OAuthAuth,
-): Headers {
+function mergeHeaders(input: RequestInfo | URL, init?: RequestInit): Headers {
   const headers = new Headers();
 
   if (input instanceof Request) {
@@ -419,24 +534,29 @@ function mergeHeaders(
     });
   }
 
-  if (init.headers instanceof Headers) {
-    init.headers.forEach((value, key) => {
+  const initHeaders = init?.headers;
+  if (initHeaders instanceof Headers) {
+    initHeaders.forEach((value, key) => {
       headers.set(key, value);
     });
-  } else if (Array.isArray(init.headers)) {
-    for (const [key, value] of init.headers) {
+  } else if (Array.isArray(initHeaders)) {
+    for (const [key, value] of initHeaders) {
       if (typeof value !== "undefined") {
         headers.set(key, String(value));
       }
     }
-  } else if (init.headers) {
-    for (const [key, value] of Object.entries(init.headers)) {
+  } else if (initHeaders) {
+    for (const [key, value] of Object.entries(initHeaders)) {
       if (typeof value !== "undefined") {
         headers.set(key, String(value));
       }
     }
   }
 
+  return headers;
+}
+
+function setOAuthHeaders(headers: Headers, auth: OAuthAuth, userAgent: string): Headers {
   const incomingBeta = headers.get("anthropic-beta") ?? "";
   const betas = incomingBeta
     .split(",")
@@ -447,6 +567,7 @@ function mergeHeaders(
   headers.set("anthropic-version", ANTHROPIC_VERSION);
   headers.set("anthropic-beta", [...new Set([...REQUIRED_BETAS, ...betas])].join(","));
   headers.set("x-app", APP_ID);
+  headers.set("user-agent", userAgent);
   headers.delete("x-api-key");
 
   return headers;
@@ -515,9 +636,6 @@ export const AnthropicAuthPlugin = (async ({ client }: PluginInput) => {
       const prefix = "You are Claude Code, Anthropic's official CLI for Claude.";
       if (input.model?.providerID === "anthropic") {
         output.system.unshift(prefix);
-        if (output.system[1]) {
-          output.system[1] = `${prefix}\n\n${output.system[1]}`;
-        }
       }
     },
     auth: {
@@ -538,6 +656,8 @@ export const AnthropicAuthPlugin = (async ({ client }: PluginInput) => {
             };
           }
 
+          let refreshPromise: Promise<string> | null = null;
+
           return {
             apiKey: "",
             async fetch(input: RequestInfo | URL, init?: RequestInit) {
@@ -545,49 +665,56 @@ export const AnthropicAuthPlugin = (async ({ client }: PluginInput) => {
               if (!isOAuthAuth(auth)) return fetch(input, init);
 
               if (!auth.access || auth.expires < Date.now()) {
-                const response = await fetch(TOKEN_URL, {
-                  method: "POST",
-                  headers: {
-                    "Content-Type": "application/json",
-                    "User-Agent": "axios/1.13.6",
-                  },
-                  body: JSON.stringify({
-                    grant_type: "refresh_token",
-                    refresh_token: auth.refresh,
-                    client_id: CLIENT_ID,
-                  }),
-                });
+                if (!refreshPromise) {
+                  refreshPromise = (async () => {
+                    const response = await fetch(TOKEN_URL, {
+                      method: "POST",
+                      headers: makeTokenHeaders(userAgent),
+                      body: makeTokenBody({
+                        grant_type: "refresh_token",
+                        refresh_token: auth.refresh,
+                        client_id: CLIENT_ID,
+                      }),
+                    });
 
-                if (!response.ok) {
-                  throw new Error(`Token refresh failed: ${response.status}`);
+                    if (!response.ok) {
+                      const body = await response.text().catch(() => "");
+                      throw new Error(`Token refresh failed: ${response.status} — ${body}`);
+                    }
+
+                    const json = (await response.json()) as {
+                      refresh_token: string;
+                      access_token: string;
+                      expires_in: number;
+                    };
+
+                    await authClient.auth.set({
+                      path: {
+                        id: "anthropic",
+                      },
+                      body: {
+                        type: "oauth",
+                        refresh: json.refresh_token,
+                        access: json.access_token,
+                        expires: Date.now() + json.expires_in * 1000,
+                      },
+                    });
+
+                    auth.access = json.access_token;
+                    auth.expires = Date.now() + json.expires_in * 1000;
+                    auth.refresh = json.refresh_token;
+                    return json.access_token;
+                  })().finally(() => {
+                    refreshPromise = null;
+                  });
                 }
 
-                const json = (await response.json()) as {
-                  refresh_token: string;
-                  access_token: string;
-                  expires_in: number;
-                };
-
-                await authClient.auth.set({
-                  path: {
-                    id: "anthropic",
-                  },
-                  body: {
-                    type: "oauth",
-                    refresh: json.refresh_token,
-                    access: json.access_token,
-                    expires: Date.now() + json.expires_in * 1000,
-                  },
-                });
-
-                auth.access = json.access_token;
-                auth.expires = Date.now() + json.expires_in * 1000;
-                auth.refresh = json.refresh_token;
+                auth.access = await refreshPromise;
               }
 
               const requestInit: RequestInit = init ?? {};
-              const headers = mergeHeaders(input, requestInit, auth);
-              headers.set("user-agent", userAgent);
+              const headers = mergeHeaders(input, requestInit);
+              setOAuthHeaders(headers, auth, userAgent);
               const body = rewriteRequestBody(requestInit.body);
               const requestInput = withMessagesBeta(input);
 

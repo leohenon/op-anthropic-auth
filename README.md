@@ -5,7 +5,7 @@
 Anthropic OAuth plugin for OpenCode-compatible clients.
 
 > [!WARNING]
-> Anthropic now blocks third-party tools, Claude Pro/Max plan limits no longer apply, so you will need to claim/enable extra usage.
+> Use this at your own risk. This may go against Anthropic TOS.
 
 ## Install
 
