@@ -6,6 +6,7 @@ Anthropic OAuth plugin for OpenCode-compatible clients.
 
 > [!WARNING]
 > Use this at your own risk. This may go against Anthropic TOS.
+> Please do not use this with oh-my-opencode or any plugins that cause heavy token usage.
 
 ## Install
 
