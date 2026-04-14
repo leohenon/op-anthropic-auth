@@ -1,6 +1,6 @@
 {
   "name": "op-anthropic-auth",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -28,7 +28,7 @@
     "@openauthjs/openauth": "^0.4.3"
   },
   "devDependencies": {
-    "@opencode-ai/plugin": "^0.4.45",
+    "@opencode-ai/plugin": "^1.4.3",
     "@types/node": "^24.6.1",
     "typescript": "^5.9.3"
   }

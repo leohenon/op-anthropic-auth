@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import { generatePKCE } from "@openauthjs/openauth/pkce";
 import type { Plugin, PluginInput } from "@opencode-ai/plugin";
@@ -6,16 +7,12 @@ const CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
 const TOKEN_URL = "https://platform.claude.com/v1/oauth/token";
 const CALLBACK_URL = "https://platform.claude.com/oauth/code/callback";
 const TIMEOUT = 5 * 60 * 1000;
-const ANTHROPIC_VERSION = "2023-06-01";
-const APP_ID = "cli";
-const CLAUDE_CODE_URL = "https://registry.npmjs.org/@anthropic-ai/claude-code";
-const CLAUDE_CODE_FALLBACK = "2.1.96";
 const REQUIRED_BETAS = [
   "oauth-2025-04-20",
   "interleaved-thinking-2025-05-14",
 ] as const;
 const TOOL_PREFIX = "mcp_";
-const OPENCODE_IDENTITY = "You are OpenCode, the best coding agent on the planet.";
+const OPENCODE_IDENTITY_PREFIX = "You are OpenCode";
 const CLAUDE_CODE_IDENTITY = "You are a Claude agent, built on Anthropic's Claude Agent SDK.";
 const PARAGRAPH_REMOVAL_ANCHORS = [
   "github.com/anomalyco/opencode",
@@ -24,9 +21,12 @@ const PARAGRAPH_REMOVAL_ANCHORS = [
 const TEXT_REPLACEMENTS: Array<{ match: string; replacement: string }> = [
   { match: "if OpenCode honestly", replacement: "if the assistant honestly" },
 ];
-
-let cachedUserAgent: string | undefined;
-let pendingUserAgent: Promise<string> | undefined;
+const CLAUDE_CODE_VERSION = "2.1.87";
+const CLAUDE_CODE_ENTRYPOINT = "sdk-cli";
+const CCH_SALT = "59cf53e54c78";
+const CCH_POSITIONS = [4, 7, 20] as const;
+const REQUEST_USER_AGENT = "claude-cli/2.1.87 (external, cli)";
+const TOKEN_USER_AGENT = "axios/1.13.6";
 
 type Mode = "max" | "console";
 
@@ -72,6 +72,12 @@ type AuthSetter = {
   };
 };
 
+type SystemBlock = { type: string; text: string; [k: string]: unknown };
+type Message = {
+  role?: string;
+  content?: string | Array<{ type?: string; text?: string }>;
+};
+
 function isOAuthAuth(value: unknown): value is OAuthAuth {
   if (!value || typeof value !== "object") return false;
 
@@ -88,68 +94,8 @@ function trim(value: unknown): string {
   return value.trim();
 }
 
-function userAgentFromVersion(version: string): string {
-  const value = trim(version);
-  if (!value) return "";
-  return `claude-code/${value}`;
-}
-
-async function fetchRegistryVersion(): Promise<string> {
-  const channel = trim(process.env.OP_ANTHROPIC_AUTH_CLAUDE_CODE_CHANNEL) || "latest";
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 3000);
-
-  try {
-    const response = await fetch(CLAUDE_CODE_URL, {
-      headers: {
-        Accept: "application/json",
-      },
-      signal: controller.signal,
-    });
-
-    if (!response.ok) {
-      throw new Error(`Registry lookup failed: ${response.status}`);
-    }
-
-    const body = (await response.json()) as {
-      "dist-tags"?: Record<string, unknown>;
-    };
-    const version = trim(body["dist-tags"]?.[channel]);
-    if (!version) {
-      throw new Error(`Missing dist-tag: ${channel}`);
-    }
-
-    return version;
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
-async function resolveUserAgent(): Promise<string> {
-  const forcedUserAgent = trim(process.env.OP_ANTHROPIC_AUTH_USER_AGENT);
-  if (forcedUserAgent) return forcedUserAgent;
-
-  const forcedVersion = trim(process.env.OP_ANTHROPIC_AUTH_CLAUDE_CODE_VERSION);
-  if (forcedVersion) return userAgentFromVersion(forcedVersion);
-
-  if (cachedUserAgent) return cachedUserAgent;
-  if (pendingUserAgent) return pendingUserAgent;
-
-  pendingUserAgent = (async () => {
-    try {
-      cachedUserAgent = userAgentFromVersion(await fetchRegistryVersion());
-    } catch {
-      cachedUserAgent = userAgentFromVersion(CLAUDE_CODE_FALLBACK);
-    }
-
-    return cachedUserAgent;
-  })();
-
-  try {
-    return await pendingUserAgent;
-  } finally {
-    pendingUserAgent = undefined;
-  }
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value != null && typeof value === "object" && !Array.isArray(value);
 }
 
 function makeState(): string {
@@ -218,22 +164,20 @@ async function local(state: string): Promise<LocalAuthorization> {
 
   return new Promise((resolve, reject) => {
     let done = false;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    let complete!: (value: string | null) => void;
-    const wait = new Promise<string | null>((innerResolve) => {
-      complete = innerResolve;
-    });
+    let timer: NodeJS.Timeout | undefined;
 
     const end = (value: string | null) => {
       if (done) return;
       done = true;
       if (timer) clearTimeout(timer);
-      if (server.listening) {
-        server.close(() => complete(value));
-        return;
-      }
-      complete(value);
+      server.close();
+      settle(value);
     };
+
+    let settle: (value: string | null) => void = () => {};
+    const wait = new Promise<string | null>((resolveWait) => {
+      settle = resolveWait;
+    });
 
     server.on("request", (req, res) => {
       const url = new URL(
@@ -307,27 +251,23 @@ async function authorize(mode: Mode) {
 
   return {
     url: makeUrl(mode, pkce.challenge, state, CALLBACK_URL),
-    instructions: "Paste the authorization code here: ",
+    instructions: "Paste the authorization code here:",
     method: "code" as const,
     callback: async (code: string): Promise<OAuthCredentials | AuthFailure> =>
       exchange(code, pkce.verifier, CALLBACK_URL, state),
   };
 }
 
-function makeTokenHeaders(userAgent: string): HeadersInit {
+function makeTokenHeaders(): HeadersInit {
   return {
     Accept: "application/json, text/plain, */*",
-    "Content-Type": "application/x-www-form-urlencoded",
-    "User-Agent": userAgent,
+    "Content-Type": "application/json",
+    "User-Agent": TOKEN_USER_AGENT,
   };
 }
 
 function makeTokenBody(params: Record<string, string>): string {
-  const body = new URLSearchParams();
-  for (const [key, value] of Object.entries(params)) {
-    body.set(key, value);
-  }
-  return body.toString();
+  return JSON.stringify(params);
 }
 
 async function exchange(
@@ -340,10 +280,9 @@ async function exchange(
   if (!parsed) return { type: "failed" };
   if (parsed.state !== expected) return { type: "failed" };
 
-  const userAgent = await resolveUserAgent();
   const result = await fetch(TOKEN_URL, {
     method: "POST",
-    headers: makeTokenHeaders(userAgent),
+    headers: makeTokenHeaders(),
     body: makeTokenBody({
       code: parsed.code,
       state: parsed.state,
@@ -371,11 +310,10 @@ async function exchange(
 }
 
 function sanitizeSystemText(text: string): string {
-  if (!text.includes(OPENCODE_IDENTITY)) return text;
-
   const paragraphs = text.split(/\n\n+/);
+
   const filtered = paragraphs.filter((paragraph) => {
-    if (paragraph.includes(OPENCODE_IDENTITY) && paragraph.trim() === OPENCODE_IDENTITY) {
+    if (paragraph.includes(OPENCODE_IDENTITY_PREFIX)) {
       return false;
     }
 
@@ -387,21 +325,16 @@ function sanitizeSystemText(text: string): string {
   });
 
   let result = filtered.join("\n\n");
-  result = result.replace(OPENCODE_IDENTITY, "").replace(/\n{3,}/g, "\n\n");
 
   for (const rule of TEXT_REPLACEMENTS) {
     result = result.replace(rule.match, rule.replacement);
   }
 
-  result = result
-    .replace(/\bOpenCode\b/g, "Claude Code")
-    .replace(/\bopencode\b/gi, "Claude");
-
   return result.trim();
 }
 
-function prependClaudeCodeIdentity(system: unknown): Array<{ type: string; text: string } & Record<string, unknown>> {
-  const identityBlock = {
+function prependClaudeCodeIdentity(system: unknown): SystemBlock[] {
+  const identityBlock: SystemBlock = {
     type: "text",
     text: CLAUDE_CODE_IDENTITY,
   };
@@ -414,31 +347,28 @@ function prependClaudeCodeIdentity(system: unknown): Array<{ type: string; text:
     return [identityBlock, { type: "text", text: sanitized }];
   }
 
-  if (!Array.isArray(system) && typeof system === "object") {
-    const record = system as Record<string, unknown>;
-    return [
-      identityBlock,
-      {
-        ...record,
-        type: typeof record.type === "string" ? record.type : "text",
-        text: sanitizeSystemText(typeof record.text === "string" ? record.text : ""),
-      },
-    ];
+  if (isRecord(system)) {
+    const type = typeof system.type === "string" ? system.type : "text";
+    const text = typeof system.text === "string" ? system.text : "";
+    return [identityBlock, { ...system, type, text: sanitizeSystemText(text) }];
   }
 
   if (!Array.isArray(system)) return [identityBlock];
 
-  const sanitized = system.map((item) => {
+  const sanitized: SystemBlock[] = system.map((item: unknown) => {
     if (typeof item === "string") {
       return { type: "text", text: sanitizeSystemText(item) };
     }
 
-    if (item && typeof item === "object") {
-      const record = item as Record<string, unknown>;
+    if (
+      isRecord(item) &&
+      item.type === "text" &&
+      typeof item.text === "string"
+    ) {
       return {
-        ...record,
-        type: record.type === "text" ? "text" : typeof record.type === "string" ? record.type : "text",
-        text: sanitizeSystemText(typeof record.text === "string" ? record.text : ""),
+        ...item,
+        type: "text",
+        text: sanitizeSystemText(item.text),
       };
     }
 
@@ -452,77 +382,48 @@ function prependClaudeCodeIdentity(system: unknown): Array<{ type: string; text:
   return [identityBlock, ...sanitized];
 }
 
-function rewriteRequestBody(body: BodyInit | null | undefined): BodyInit | null | undefined {
-  if (!body || typeof body !== "string") return body;
+function prefixName(name: string): string {
+  return `${TOOL_PREFIX}${name.charAt(0).toUpperCase()}${name.slice(1)}`;
+}
 
-  try {
-    const parsed = JSON.parse(body) as {
-      system?: unknown;
-      tools?: Array<{ name?: string } & Record<string, unknown>>;
-      messages?: Array<{
-        role?: string;
-        content?: string | Array<{ type?: string; name?: string; text?: string } & Record<string, unknown>>;
-      }>;
-    };
+function unprefixName(name: string): string {
+  return `${name.charAt(0).toLowerCase()}${name.slice(1)}`;
+}
 
-    parsed.system = prependClaudeCodeIdentity(parsed.system);
-
-    if (Array.isArray(parsed.system) && parsed.system.length > 1) {
-      const kept = [parsed.system[0]];
-      const movedTexts: string[] = [];
-
-      for (let i = 1; i < parsed.system.length; i++) {
-        const entry = parsed.system[i] as { text?: string } | string;
-        const text = typeof entry === "string" ? entry : trim(entry?.text);
-        if (text) movedTexts.push(text);
-      }
-
-      if (movedTexts.length > 0 && Array.isArray(parsed.messages)) {
-        const firstUser = parsed.messages.find((message) => message.role === "user");
-        if (firstUser) {
-          parsed.system = kept;
-          const prefix = movedTexts.join("\n\n");
-
-          if (typeof firstUser.content === "string") {
-            firstUser.content = `${prefix}\n\n${firstUser.content}`;
-          } else if (Array.isArray(firstUser.content)) {
-            firstUser.content.unshift({ type: "text", text: prefix });
-          }
-        }
-      }
-    }
-
-    if (Array.isArray(parsed.tools)) {
-      parsed.tools = parsed.tools.map((tool) => ({
+function prefixToolNames(parsed: Record<string, unknown>): string {
+  if (parsed.tools && Array.isArray(parsed.tools)) {
+    parsed.tools = parsed.tools.map(
+      (tool: { name?: string; [k: string]: unknown }) => ({
         ...tool,
-        name: tool.name ? `${TOOL_PREFIX}${tool.name}` : tool.name,
-      }));
-    }
-
-    if (Array.isArray(parsed.messages)) {
-      parsed.messages = parsed.messages.map((message) => {
-        if (Array.isArray(message.content)) {
-          return {
-            ...message,
-            content: message.content.map((block) => {
-              if (block.type === "tool_use" && block.name) {
-                return {
-                  ...block,
-                  name: `${TOOL_PREFIX}${block.name}`,
-                };
-              }
-              return block;
-            }),
-          };
-        }
-        return message;
-      });
-    }
-
-    return JSON.stringify(parsed);
-  } catch {
-    return body;
+        name: tool.name ? prefixName(tool.name) : tool.name,
+      }),
+    );
   }
+
+  if (parsed.messages && Array.isArray(parsed.messages)) {
+    parsed.messages = parsed.messages.map(
+      (msg: {
+        content?: Array<{
+          type: string;
+          name?: string;
+          [k: string]: unknown;
+        }>;
+        [k: string]: unknown;
+      }) => {
+        if (msg.content && Array.isArray(msg.content)) {
+          msg.content = msg.content.map((block) => {
+            if (block.type === "tool_use" && block.name) {
+              return { ...block, name: prefixName(block.name) };
+            }
+            return block;
+          });
+        }
+        return msg;
+      },
+    );
+  }
+
+  return JSON.stringify(parsed);
 }
 
 function mergeHeaders(input: RequestInfo | URL, init?: RequestInit): Headers {
@@ -556,24 +457,25 @@ function mergeHeaders(input: RequestInfo | URL, init?: RequestInit): Headers {
   return headers;
 }
 
-function setOAuthHeaders(headers: Headers, auth: OAuthAuth, userAgent: string): Headers {
-  const incomingBeta = headers.get("anthropic-beta") ?? "";
-  const betas = incomingBeta
+function mergeBetaHeaders(headers: Headers): string {
+  const incomingBeta = headers.get("anthropic-beta") || "";
+  const incomingBetasList = incomingBeta
     .split(",")
     .map((beta) => beta.trim())
     .filter(Boolean);
 
-  headers.set("authorization", `Bearer ${auth.access}`);
-  headers.set("anthropic-version", ANTHROPIC_VERSION);
-  headers.set("anthropic-beta", [...new Set([...REQUIRED_BETAS, ...betas])].join(","));
-  headers.set("x-app", APP_ID);
-  headers.set("user-agent", userAgent);
-  headers.delete("x-api-key");
+  return [...new Set([...REQUIRED_BETAS, ...incomingBetasList])].join(",");
+}
 
+function setOAuthHeaders(headers: Headers, accessToken: string): Headers {
+  headers.set("authorization", `Bearer ${accessToken}`);
+  headers.set("anthropic-beta", mergeBetaHeaders(headers));
+  headers.set("user-agent", REQUEST_USER_AGENT);
+  headers.delete("x-api-key");
   return headers;
 }
 
-function withMessagesBeta(input: RequestInfo | URL): RequestInfo | URL {
+function rewriteUrl(input: RequestInfo | URL): RequestInfo | URL {
   let requestUrl: URL | null = null;
 
   try {
@@ -600,7 +502,76 @@ function withMessagesBeta(input: RequestInfo | URL): RequestInfo | URL {
   return input;
 }
 
-async function rewriteResponse(response: Response): Promise<Response> {
+function extractFirstUserMessageText(messages: Message[]): string {
+  const userMsg = messages.find((message) => message.role === "user");
+  if (!userMsg) return "";
+
+  const { content } = userMsg;
+  if (typeof content === "string") return content;
+
+  if (Array.isArray(content)) {
+    const textBlock = content.find((block) => block.type === "text");
+    if (textBlock?.text) return textBlock.text;
+  }
+
+  return "";
+}
+
+function computeCCH(messageText: string): string {
+  return createHash("sha256").update(messageText).digest("hex").slice(0, 5);
+}
+
+function computeVersionSuffix(messageText: string): string {
+  const chars = CCH_POSITIONS.map((index) => messageText[index] || "0").join("");
+
+  return createHash("sha256")
+    .update(`${CCH_SALT}${chars}${CLAUDE_CODE_VERSION}`)
+    .digest("hex")
+    .slice(0, 3);
+}
+
+function buildBillingHeaderValue(messages: Message[]): string {
+  const text = extractFirstUserMessageText(messages);
+  const suffix = computeVersionSuffix(text);
+  const cch = computeCCH(text);
+
+  return (
+    "x-anthropic-billing-header: " +
+    `cc_version=${CLAUDE_CODE_VERSION}.${suffix}; ` +
+    `cc_entrypoint=${CLAUDE_CODE_ENTRYPOINT}; ` +
+    `cch=${cch};`
+  );
+}
+
+function rewriteRequestBody(body: BodyInit | null | undefined): BodyInit | null | undefined {
+  if (!body || typeof body !== "string") return body;
+
+  try {
+    const parsed = JSON.parse(body) as {
+      system?: unknown;
+      tools?: Array<{ name?: string } & Record<string, unknown>>;
+      messages?: Message[];
+    };
+
+    const billingHeader =
+      Array.isArray(parsed.messages) &&
+      parsed.messages.some((message) => message.role === "user")
+        ? buildBillingHeaderValue(parsed.messages)
+        : null;
+
+    parsed.system = prependClaudeCodeIdentity(parsed.system);
+
+    if (billingHeader && Array.isArray(parsed.system)) {
+      parsed.system.unshift({ type: "text", text: billingHeader });
+    }
+
+    return prefixToolNames(parsed as Record<string, unknown>);
+  } catch {
+    return body;
+  }
+}
+
+function rewriteResponse(response: Response): Response {
   if (!response.body) return response;
 
   const reader = response.body.getReader();
@@ -616,7 +587,10 @@ async function rewriteResponse(response: Response): Promise<Response> {
       }
 
       let text = decoder.decode(value, { stream: true });
-      text = text.replace(/"name"\s*:\s*"mcp_([^"]+)"/g, '"name": "$1"');
+      text = text.replace(
+        /"name"\s*:\s*"mcp_([^"]+)"/g,
+        (_match, name: string) => `"name": "${unprefixName(name)}"`,
+      );
       controller.enqueue(encoder.encode(text));
     },
   });
@@ -632,19 +606,11 @@ export const AnthropicAuthPlugin = (async ({ client }: PluginInput) => {
   const authClient = client as unknown as AuthSetter;
 
   return {
-    "experimental.chat.system.transform": (input: any, output: any) => {
-      const prefix = "You are Claude Code, Anthropic's official CLI for Claude.";
-      if (input.model?.providerID === "anthropic") {
-        output.system.unshift(prefix);
-      }
-    },
     auth: {
       provider: "anthropic",
       loader: (async (getAuth: () => Promise<unknown>, provider: any) => {
         const auth = await getAuth();
         if (isOAuthAuth(auth)) {
-          const userAgent = await resolveUserAgent();
-
           for (const model of Object.values(provider.models) as Array<any>) {
             model.cost = {
               input: 0,
@@ -667,43 +633,74 @@ export const AnthropicAuthPlugin = (async ({ client }: PluginInput) => {
               if (!auth.access || auth.expires < Date.now()) {
                 if (!refreshPromise) {
                   refreshPromise = (async () => {
-                    const response = await fetch(TOKEN_URL, {
-                      method: "POST",
-                      headers: makeTokenHeaders(userAgent),
-                      body: makeTokenBody({
-                        grant_type: "refresh_token",
-                        refresh_token: auth.refresh,
-                        client_id: CLIENT_ID,
-                      }),
-                    });
+                    const maxRetries = 2;
+                    const baseDelayMs = 500;
 
-                    if (!response.ok) {
-                      const body = await response.text().catch(() => "");
-                      throw new Error(`Token refresh failed: ${response.status} — ${body}`);
+                    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+                      try {
+                        if (attempt > 0) {
+                          const delay = baseDelayMs * 2 ** (attempt - 1);
+                          await new Promise((resolve) => setTimeout(resolve, delay));
+                        }
+
+                        const response = await fetch(TOKEN_URL, {
+                          method: "POST",
+                          headers: makeTokenHeaders(),
+                          body: makeTokenBody({
+                            grant_type: "refresh_token",
+                            refresh_token: auth.refresh,
+                            client_id: CLIENT_ID,
+                          }),
+                        });
+
+                        if (!response.ok) {
+                          if (response.status >= 500 && attempt < maxRetries) {
+                            await response.body?.cancel();
+                            continue;
+                          }
+
+                          const body = await response.text().catch(() => "");
+                          throw new Error(`Token refresh failed: ${response.status} — ${body}`);
+                        }
+
+                        const json = (await response.json()) as {
+                          refresh_token: string;
+                          access_token: string;
+                          expires_in: number;
+                        };
+
+                        await authClient.auth.set({
+                          path: {
+                            id: "anthropic",
+                          },
+                          body: {
+                            type: "oauth",
+                            refresh: json.refresh_token,
+                            access: json.access_token,
+                            expires: Date.now() + json.expires_in * 1000,
+                          },
+                        });
+
+                        return json.access_token;
+                      } catch (error) {
+                        const isNetworkError =
+                          error instanceof Error &&
+                          (error.message.includes("fetch failed") ||
+                            ("code" in error &&
+                              (error.code === "ECONNRESET" ||
+                                error.code === "ECONNREFUSED" ||
+                                error.code === "ETIMEDOUT" ||
+                                error.code === "UND_ERR_CONNECT_TIMEOUT")));
+
+                        if (attempt < maxRetries && isNetworkError) {
+                          continue;
+                        }
+
+                        throw error;
+                      }
                     }
 
-                    const json = (await response.json()) as {
-                      refresh_token: string;
-                      access_token: string;
-                      expires_in: number;
-                    };
-
-                    await authClient.auth.set({
-                      path: {
-                        id: "anthropic",
-                      },
-                      body: {
-                        type: "oauth",
-                        refresh: json.refresh_token,
-                        access: json.access_token,
-                        expires: Date.now() + json.expires_in * 1000,
-                      },
-                    });
-
-                    auth.access = json.access_token;
-                    auth.expires = Date.now() + json.expires_in * 1000;
-                    auth.refresh = json.refresh_token;
-                    return json.access_token;
+                    throw new Error("Token refresh exhausted all retries");
                   })().finally(() => {
                     refreshPromise = null;
                   });
@@ -714,9 +711,9 @@ export const AnthropicAuthPlugin = (async ({ client }: PluginInput) => {
 
               const requestInit: RequestInit = init ?? {};
               const headers = mergeHeaders(input, requestInit);
-              setOAuthHeaders(headers, auth, userAgent);
+              setOAuthHeaders(headers, auth.access);
               const body = rewriteRequestBody(requestInit.body);
-              const requestInput = withMessagesBeta(input);
+              const requestInput = rewriteUrl(input);
 
               const response = await fetch(requestInput, {
                 ...requestInit,

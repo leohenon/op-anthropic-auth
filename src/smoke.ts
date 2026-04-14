@@ -6,8 +6,8 @@ const TOKEN_URL = "https://platform.claude.com/v1/oauth/token";
 const MESSAGE_URL = "https://api.anthropic.com/v1/messages?beta=true";
 const CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
 const ANTHROPIC_VERSION = "2023-06-01";
-const APP_ID = "cli";
-const CLAUDE_CODE_FALLBACK = "2.1.96";
+const REQUEST_USER_AGENT = "claude-cli/2.1.87 (external, cli)";
+const TOKEN_USER_AGENT = "axios/1.13.6";
 
 type StoredAuthFile = {
   anthropic?: {
@@ -35,9 +35,7 @@ function trim(value: unknown): string {
   return value.trim();
 }
 
-const userAgent =
-  trim(process.env.OP_ANTHROPIC_AUTH_USER_AGENT) ||
-  `claude-code/${trim(process.env.OP_ANTHROPIC_AUTH_CLAUDE_CODE_VERSION) || CLAUDE_CODE_FALLBACK}`;
+const userAgent = trim(process.env.OP_ANTHROPIC_AUTH_USER_AGENT) || REQUEST_USER_AGENT;
 
 const model = process.env.ANTHROPIC_SMOKE_MODEL || "claude-3-haiku-20240307";
 const refreshMode = process.env.ANTHROPIC_SMOKE_REFRESH === "1";
@@ -55,14 +53,14 @@ if (refreshMode) {
     method: "POST",
     headers: {
       Accept: "application/json, text/plain, */*",
-      "Content-Type": "application/x-www-form-urlencoded",
-      "User-Agent": userAgent,
+      "Content-Type": "application/json",
+      "User-Agent": TOKEN_USER_AGENT,
     },
-    body: new URLSearchParams({
+    body: JSON.stringify({
       grant_type: "refresh_token",
       refresh_token: refresh,
       client_id: CLIENT_ID,
-    }).toString(),
+    }),
   });
 
   if (!token.ok) {
@@ -90,7 +88,6 @@ const message = await fetch(MESSAGE_URL, {
     "Content-Type": "application/json",
     "anthropic-version": ANTHROPIC_VERSION,
     "anthropic-beta": "oauth-2025-04-20,interleaved-thinking-2025-05-14",
-    "x-app": APP_ID,
     authorization: `Bearer ${access}`,
     "User-Agent": userAgent,
   },
