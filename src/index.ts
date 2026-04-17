@@ -27,6 +27,11 @@ const CCH_SALT = "59cf53e54c78";
 const CCH_POSITIONS = [4, 7, 20] as const;
 const REQUEST_USER_AGENT = "claude-cli/2.1.87 (external, cli)";
 const TOKEN_USER_AGENT = "axios/1.13.6";
+const DEFAULT_EXTRA_MODELS: Record<string, ExtraModel> = {
+  "claude-opus-4-7": {
+    name: "Claude Opus 4.7",
+  },
+};
 
 type Mode = "max" | "console";
 
@@ -70,6 +75,16 @@ type AuthSetter = {
       body: OAuthAuth;
     }): Promise<void>;
   };
+};
+
+type ExtraModel = {
+  id?: string;
+  name?: string;
+  [k: string]: unknown;
+};
+
+type PluginOptions = {
+  extraModels?: Record<string, ExtraModel>;
 };
 
 type SystemBlock = { type: string; text: string; [k: string]: unknown };
@@ -543,6 +558,35 @@ function buildBillingHeaderValue(messages: Message[]): string {
   );
 }
 
+function normalizeExtraModels(input: unknown): Record<string, ExtraModel> {
+  if (!isRecord(input)) return {};
+
+  const extraModels: Record<string, ExtraModel> = {};
+
+  for (const [key, value] of Object.entries(input)) {
+    if (!isRecord(value)) continue;
+
+    const id = trim(value.id) || key;
+    const name = trim(value.name) || id;
+    extraModels[key] = {
+      ...value,
+      id,
+      name,
+    };
+  }
+
+  return extraModels;
+}
+
+function resolveExtraModels(options: unknown): Record<string, ExtraModel> {
+  const extraModels = isRecord(options) ? options.extraModels : undefined;
+
+  return {
+    ...normalizeExtraModels(DEFAULT_EXTRA_MODELS),
+    ...normalizeExtraModels(extraModels),
+  };
+}
+
 function rewriteRequestBody(body: BodyInit | null | undefined): BodyInit | null | undefined {
   if (!body || typeof body !== "string") return body;
 
@@ -602,8 +646,12 @@ function rewriteResponse(response: Response): Response {
   });
 }
 
-export const AnthropicAuthPlugin = (async ({ client }: PluginInput) => {
+export const AnthropicAuthPlugin = (async (
+  { client }: PluginInput,
+  options?: PluginOptions,
+) => {
   const authClient = client as unknown as AuthSetter;
+  const extraModels = resolveExtraModels(options);
 
   return {
     auth: {
@@ -611,6 +659,12 @@ export const AnthropicAuthPlugin = (async ({ client }: PluginInput) => {
       loader: (async (getAuth: () => Promise<unknown>, provider: any) => {
         const auth = await getAuth();
         if (isOAuthAuth(auth)) {
+          provider.models ||= {};
+
+          for (const [id, model] of Object.entries(extraModels)) {
+            provider.models[id] ||= model;
+          }
+
           for (const model of Object.values(provider.models) as Array<any>) {
             model.cost = {
               input: 0,

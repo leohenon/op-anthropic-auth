@@ -25,6 +25,25 @@ npm i -g op-anthropic-auth@latest
 
 Restart your client, run `/connect`, then choose `Anthropic API Key` -> `Claude Pro/Max`.
 
+If OpenCode is missing another model, register it through plugin options:
+
+```json
+{
+  "plugin": [
+    [
+      "op-anthropic-auth",
+      {
+        "extraModels": {
+          "claude-new-model": {
+            "name": "Claude New Model"
+          }
+        }
+      }
+    ]
+  ]
+}
+```
+
 ## Verify
 
 ```bash
