@@ -23,6 +23,7 @@ const TEXT_REPLACEMENTS: Array<{ match: string; replacement: string }> = [
 ];
 const CLAUDE_CODE_VERSION = "2.1.87";
 const CLAUDE_CODE_ENTRYPOINT = "sdk-cli";
+const BILLING_HEADER_PREFIX = "x-anthropic-billing-header:";
 const CCH_SALT = "59cf53e54c78";
 const CCH_POSITIONS = [4, 7, 20] as const;
 const REQUEST_USER_AGENT = "claude-cli/2.1.87 (external, cli)";
@@ -90,7 +91,7 @@ type PluginOptions = {
 type SystemBlock = { type: string; text: string; [k: string]: unknown };
 type Message = {
   role?: string;
-  content?: string | Array<{ type?: string; text?: string }>;
+  content?: string | Array<{ type?: string; text?: string; [k: string]: unknown }>;
 };
 
 function isOAuthAuth(value: unknown): value is OAuthAuth {
@@ -551,11 +552,66 @@ function buildBillingHeaderValue(messages: Message[]): string {
   const cch = computeCCH(text);
 
   return (
-    "x-anthropic-billing-header: " +
+    `${BILLING_HEADER_PREFIX} ` +
     `cc_version=${CLAUDE_CODE_VERSION}.${suffix}; ` +
     `cc_entrypoint=${CLAUDE_CODE_ENTRYPOINT}; ` +
     `cch=${cch};`
   );
+}
+
+function relocateSystemEntriesToFirstUserMessage(
+  system: unknown,
+  messages: Message[] | undefined,
+): unknown {
+  if (!Array.isArray(system) || !Array.isArray(messages)) return system;
+
+  const firstUserMessage = messages.find((message) => message.role === "user");
+  if (!firstUserMessage) return system;
+
+  const kept: SystemBlock[] = [];
+  const moved: string[] = [];
+
+  for (const entry of system) {
+    if (isRecord(entry) && typeof entry.text === "string") {
+      const text = entry.text.trim();
+      if (!text) continue;
+
+      if (
+        text.startsWith(BILLING_HEADER_PREFIX) ||
+        text === CLAUDE_CODE_IDENTITY
+      ) {
+        kept.push({ type: "text", text });
+      } else {
+        moved.push(text);
+      }
+
+      continue;
+    }
+
+    if (typeof entry === "string") {
+      const text = entry.trim();
+      if (text) moved.push(text);
+    }
+  }
+
+  if (!moved.length) return kept;
+
+  const relocatedText = moved.join("\n\n");
+
+  if (typeof firstUserMessage.content === "string") {
+    firstUserMessage.content = firstUserMessage.content
+      ? `${relocatedText}\n\n${firstUserMessage.content}`
+      : relocatedText;
+  } else if (Array.isArray(firstUserMessage.content)) {
+    firstUserMessage.content = [
+      { type: "text", text: relocatedText },
+      ...firstUserMessage.content,
+    ];
+  } else {
+    firstUserMessage.content = relocatedText;
+  }
+
+  return kept;
 }
 
 function normalizeExtraModels(input: unknown): Record<string, ExtraModel> {
@@ -608,6 +664,11 @@ function rewriteRequestBody(body: BodyInit | null | undefined): BodyInit | null 
     if (billingHeader && Array.isArray(parsed.system)) {
       parsed.system.unshift({ type: "text", text: billingHeader });
     }
+
+    parsed.system = relocateSystemEntriesToFirstUserMessage(
+      parsed.system,
+      parsed.messages,
+    );
 
     return prefixToolNames(parsed as Record<string, unknown>);
   } catch {
