@@ -758,12 +758,17 @@ export const AnthropicAuthPlugin = (async (
                           await new Promise((resolve) => setTimeout(resolve, delay));
                         }
 
+                        const currentAuth = await getAuth();
+                        const refreshToken = isOAuthAuth(currentAuth)
+                          ? currentAuth.refresh
+                          : auth.refresh;
+
                         const response = await fetch(TOKEN_URL, {
                           method: "POST",
                           headers: makeTokenHeaders(),
                           body: makeTokenBody({
                             grant_type: "refresh_token",
-                            refresh_token: auth.refresh,
+                            refresh_token: refreshToken,
                             client_id: CLIENT_ID,
                           }),
                         });
