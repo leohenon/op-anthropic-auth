@@ -779,6 +779,20 @@ export const AnthropicAuthPlugin = (async (
                             continue;
                           }
 
+                          // ponytail: on 401, another process may have already rotated the refresh token
+                          if (response.status === 401 && attempt < maxRetries) {
+                            await response.body?.cancel();
+                            const updatedAuth = await getAuth();
+                            if (isOAuthAuth(updatedAuth) && updatedAuth.refresh !== refreshToken) {
+                              // Refresh token changed — another process already refreshed
+                              if (updatedAuth.access && updatedAuth.expires > Date.now()) {
+                                return updatedAuth.access;
+                              }
+                              // New refresh token but expired access — retry with it
+                              continue;
+                            }
+                          }
+
                           const body = await response.text().catch(() => "");
                           throw new Error(`Token refresh failed: ${response.status} — ${body}`);
                         }
