@@ -758,12 +758,17 @@ export const AnthropicAuthPlugin = (async (
                           await new Promise((resolve) => setTimeout(resolve, delay));
                         }
 
+                        const currentAuth = await getAuth();
+                        const refreshToken = isOAuthAuth(currentAuth)
+                          ? currentAuth.refresh
+                          : auth.refresh;
+
                         const response = await fetch(TOKEN_URL, {
                           method: "POST",
                           headers: makeTokenHeaders(),
                           body: makeTokenBody({
                             grant_type: "refresh_token",
-                            refresh_token: auth.refresh,
+                            refresh_token: refreshToken,
                             client_id: CLIENT_ID,
                           }),
                         });
@@ -772,6 +777,20 @@ export const AnthropicAuthPlugin = (async (
                           if (response.status >= 500 && attempt < maxRetries) {
                             await response.body?.cancel();
                             continue;
+                          }
+
+                          // ponytail: on 401, another process may have already rotated the refresh token
+                          if (response.status === 401 && attempt < maxRetries) {
+                            await response.body?.cancel();
+                            const updatedAuth = await getAuth();
+                            if (isOAuthAuth(updatedAuth) && updatedAuth.refresh !== refreshToken) {
+                              // Refresh token changed — another process already refreshed
+                              if (updatedAuth.access && updatedAuth.expires > Date.now()) {
+                                return updatedAuth.access;
+                              }
+                              // New refresh token but expired access — retry with it
+                              continue;
+                            }
                           }
 
                           const body = await response.text().catch(() => "");
