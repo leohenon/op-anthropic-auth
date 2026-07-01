@@ -1,6 +1,6 @@
 # op-anthropic-auth
 
-[![node](https://img.shields.io/badge/node-%3E%3D18-teal?style=flat-square&logo=nodedotjs&logoColor=white)](https://nodejs.org)
+[![npm](https://img.shields.io/npm/v/op-anthropic-auth?style=flat-square&logo=npm&logoColor=white&label=npm&color=teal)](https://www.npmjs.com/package/op-anthropic-auth)
 
 OpenCode plugin for Anthropic Oauth, no extra usage required.
 
