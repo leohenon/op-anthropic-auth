@@ -29,6 +29,9 @@ const CCH_POSITIONS = [4, 7, 20] as const;
 const REQUEST_USER_AGENT = "claude-cli/2.1.87 (external, cli)";
 const TOKEN_USER_AGENT = "axios/1.13.6";
 const DEFAULT_EXTRA_MODELS: Record<string, ExtraModel> = {
+  "claude-opus-4-8": {
+    name: "Claude Opus 4.8",
+  },
   "claude-opus-4-7": {
     name: "Claude Opus 4.7",
   },
