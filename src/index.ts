@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { createServer } from "node:http";
 import { generatePKCE } from "@openauthjs/openauth/pkce";
 import type { Plugin, PluginInput } from "@opencode-ai/plugin";
+import { CLAUDE_CODE_VERSION, REQUEST_USER_AGENT } from "./client-metadata.js";
 
 const CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
 const TOKEN_URL = "https://platform.claude.com/v1/oauth/token";
@@ -21,12 +22,10 @@ const PARAGRAPH_REMOVAL_ANCHORS = [
 const TEXT_REPLACEMENTS: Array<{ match: string; replacement: string }> = [
   { match: "if OpenCode honestly", replacement: "if the assistant honestly" },
 ];
-const CLAUDE_CODE_VERSION = "2.1.87";
 const CLAUDE_CODE_ENTRYPOINT = "sdk-cli";
 const BILLING_HEADER_PREFIX = "x-anthropic-billing-header:";
 const CCH_SALT = "59cf53e54c78";
 const CCH_POSITIONS = [4, 7, 20] as const;
-const REQUEST_USER_AGENT = "claude-cli/2.1.87 (external, cli)";
 const TOKEN_USER_AGENT = "axios/1.13.6";
 const DEFAULT_EXTRA_MODELS: Record<string, ExtraModel> = {
   "claude-opus-4-8": {
