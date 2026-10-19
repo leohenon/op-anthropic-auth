@@ -1,12 +1,12 @@
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
+import { REQUEST_USER_AGENT } from "./client-metadata.js";
 
 const TOKEN_URL = "https://platform.claude.com/v1/oauth/token";
 const MESSAGE_URL = "https://api.anthropic.com/v1/messages?beta=true";
 const CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
 const ANTHROPIC_VERSION = "2023-06-01";
-const REQUEST_USER_AGENT = "claude-cli/2.1.87 (external, cli)";
 const TOKEN_USER_AGENT = "axios/1.13.6";
 
 type StoredAuthFile = {
