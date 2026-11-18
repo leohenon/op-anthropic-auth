@@ -94,6 +94,8 @@ The plugin:
 rm -rf ~/.cache/opencode/packages/op-anthropic-auth@latest/
 ```
 
+- If a model fails with `Claude Code <version> does not support this model`, set `CLAUDE_CODE_VERSION` (for example `CLAUDE_CODE_VERSION=2.1.294`) in the OpenCode environment and restart; it overrides the client version the plugin reports
+
 If something breaks, please open an issue with your OpenCode version, plugin version, and error output
 
 ## License
